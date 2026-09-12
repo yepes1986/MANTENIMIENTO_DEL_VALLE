@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Wind, LayoutGrid, Users, AlertTriangle, Wallet, Package, CalendarClock,
   Plus, Search, Trash2, Pencil, X, CheckCircle2, Phone, MapPin,
-  ArrowLeft, TriangleAlert, PackageX, ReceiptText, Wrench, LogOut,
+  ArrowLeft, TriangleAlert, PackageX, ReceiptText, Wrench, LogOut, Image,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Auth from "./Auth";
@@ -886,27 +886,76 @@ function MaterialsTab({ materials, setMaterials }) {
 
 function MaintenanceTab({ installations, completions, setCompletions }) {
   const [filter, setFilter] = useState("todos");
+  const [completing, setCompleting] = useState(null); 
+  const [foto, setFoto] = useState(null); 
+  const [subiendo, setSubiendo] = useState(false); 
 
   const rows = installations
     .flatMap((inst) => buildMaintenanceSchedule(inst, completions).map((s) => ({ ...s, installation: inst })))
     .filter((r) => filter === "todos" || r.status === filter)
     .sort((a, b) => (a.date > b.date ? 1 : -1));
 
-  async function toggle(row) {
+  const subirFoto = async (archivo) => {
+    setSubiendo(true);
+    const nombreArchivo = `${Date.now()}-${archivo.name.replace(/\s/g, '-')}`;
+    
+    const { data, error } = await supabase.storage
+      .from('fotos-mantenimiento')
+      .upload(`public/${nombreArchivo}`, archivo);
+
+    if (error) {
+      alert('Error al subir la foto: ' + error.message);
+      setSubiendo(false);
+      return null;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('fotos-mantenimiento')
+      .getPublicUrl(`public/${nombreArchivo}`);
+
+    setSubiendo(false);
+    return urlData.publicUrl;
+  };
+
+  const guardarCompletado = async () => {
+    let urlFoto = null;
+
+    if (foto) {
+      urlFoto = await subirFoto(foto);
+      if (!urlFoto) return; 
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    const { data, error } = await supabase
+      .from("maintenance_completions")
+      .insert({
+        installation_id: completing.installation.id,
+        scheduled_date: completing.date,
+        owner_id: user.id,
+        photo_url: urlFoto 
+      })
+      .select()
+      .single();
+
+    if (!error) {
+      setCompletions([...completions, data]);
+      setCompleting(null);
+      setFoto(null);
+    } else {
+      alert('Error al guardar el mantenimiento');
+    }
+  };
+
+  const desmarcar = async (row) => {
     const existing = completions.find((c) => c.installation_id === row.installation.id && c.scheduled_date === row.date);
     if (existing) {
+      if (!confirm("¿Desmarcar este mantenimiento? Se perderá el registro y la foto asociada.")) return;
+      
       await supabase.from("maintenance_completions").delete().eq("id", existing.id);
       setCompletions(completions.filter((c) => c.id !== existing.id));
-    } else {
-      const { data: { user } } = await supabase.auth.getUser();
-      const { data, error } = await supabase
-        .from("maintenance_completions")
-        .insert({ installation_id: row.installation.id, scheduled_date: row.date, owner_id: user.id })
-        .select()
-        .single();
-      if (!error) setCompletions([...completions, data]);
     }
-  }
+  };
 
   return (
     <div>
@@ -931,30 +980,75 @@ function MaintenanceTab({ installations, completions, setCompletions }) {
                 <th className="text-left px-4 py-2 font-medium">Mant. #</th>
                 <th className="text-left px-4 py-2 font-medium">Fecha</th>
                 <th className="text-left px-4 py-2 font-medium">Estado</th>
+                <th className="text-left px-4 py-2 font-medium">Foto</th>
                 <th className="px-4 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, idx) => (
-                <tr key={idx} className="border-t border-slate-100">
-                  <td className="px-4 py-2">{r.installation.name}</td>
-                  <td className="px-4 py-2 text-slate-500">{r.n}</td>
-                  <td className="px-4 py-2 font-mono text-xs">{fmtDate(r.date)}</td>
-                  <td className="px-4 py-2">
-                    <Badge tone={r.status === "completado" ? "emerald" : r.status === "vencido" ? "rose" : r.status === "proximo" ? "amber" : "slate"}>
-                      {{ completado: "Completado", vencido: "Vencido", proximo: "Próximo", programado: "Programado" }[r.status]}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={() => toggle(r)} className="text-xs text-cyan-600 hover:text-cyan-800 font-medium inline-flex items-center gap-1">
-                      <Wrench size={12} /> {r.status === "completado" ? "Desmarcar" : "Marcar hecho"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((r, idx) => {
+                const completion = completions.find(c => c.installation_id === r.installation.id && c.scheduled_date === r.date);
+                
+                return (
+                  <tr key={idx} className="border-t border-slate-100">
+                    <td className="px-4 py-2">{r.installation.name}</td>
+                    <td className="px-4 py-2 text-slate-500">{r.n}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{fmtDate(r.date)}</td>
+                    <td className="px-4 py-2">
+                      <Badge tone={r.status === "completado" ? "emerald" : r.status === "vencido" ? "rose" : r.status === "proximo" ? "amber" : "slate"}>
+                        {{ completado: "Completado", vencido: "Vencido", proximo: "Próximo", programado: "Programado" }[r.status]}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2">
+                      {completion?.photo_url ? (
+                        <a href={completion.photo_url} target="_blank" rel="noopener noreferrer" className="text-cyan-600 hover:text-cyan-800 flex items-center gap-1 text-xs">
+                          <Image size={14} /> Ver foto
+                        </a>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {r.status === "completado" ? (
+                        <button onClick={() => desmarcar(r)} className="text-xs text-rose-600 hover:text-rose-800 font-medium inline-flex items-center gap-1">
+                          <X size={12} /> Desmarcar
+                        </button>
+                      ) : (
+                        <button onClick={() => setCompleting(r)} className="text-xs text-cyan-600 hover:text-cyan-800 font-medium inline-flex items-center gap-1">
+                          <Wrench size={12} /> Marcar hecho
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+      )}
+
+      {completing && (
+        <Modal title={`Completar Mantenimiento #${completing.n} - ${completing.installation.name}`} onClose={() => { setCompleting(null); setFoto(null); }}>
+          <Field label="Foto del mantenimiento (opcional)">
+            <input 
+              type="file" 
+              accept="image/*" 
+              capture="environment" 
+              onChange={(e) => setFoto(e.target.files[0])}
+              className={inputCls}
+            />
+          </Field>
+          {foto && (
+            <div className="mt-2 text-xs text-slate-500 bg-slate-50 p-2 rounded">
+              Archivo seleccionado: {foto.name}
+            </div>
+          )}
+          <div className="flex justify-end gap-2 mt-4">
+            <Btn tone="ghost" onClick={() => { setCompleting(null); setFoto(null); }}>Cancelar</Btn>
+            <Btn onClick={guardarCompletado} disabled={subiendo}>
+              {subiendo ? 'Subiendo foto...' : 'Guardar y Completar'}
+            </Btn>
+          </div>
+        </Modal>
       )}
     </div>
   );
