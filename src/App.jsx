@@ -221,9 +221,7 @@ export default function App() {
 
   return (
     <div className="min-h-[600px] bg-slate-50 text-slate-900 rounded-xl overflow-hidden border border-slate-200">
-      // ---------------------------------------------------------------------------
-// nombre y logo
-// ---------------------------------------------------------------------------
+            
             <div className="bg-slate-900 px-5 py-4 flex items-center gap-3">
         <img 
           src="https://rdwxhhxfcqcnekstyjws.supabase.co/storage/v1/object/public/fotos-mantenimiento/WhatsApp%20Image%202026-07-28%20at%207.13.06%20PM.jpeg" 
